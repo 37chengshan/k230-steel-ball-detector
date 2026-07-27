@@ -11,7 +11,8 @@
 - `models/steel_ball_reference_yolo11n_1024_uint8.kmodel`（v1）在 CanMV 上出现了满屏假框，**不要用于验证**。
 - `candidates/v2_raw_graph_f32/` 的 K230 画面仍出现满屏假框，**不要将它用于实际识别**。该候选版的转换参数把模型声明为浮点输入，但板端预处理仍输出 `uint8` 图像，输入契约不匹配。
 - 该目录的脚本现已加入原始 KPU 张量诊断。运行一次后，它会打印输出形状、数据类型、最大分数和超过 0.20 的候选数，用于确定 v1 的剩余问题是否为 PTQ 输出量化。
-- `candidates/v4_target_pipeline_ptq/` 按同板已验证的 `target_best.kmodel` 转换链路重新生成，是当前唯一推荐的实机候选版；仍须先用空场景和实物钢珠验收。
+- `candidates/v4_target_pipeline_ptq/` 保留用于复现 1024 PTQ 的异常输出，**不要用于实际识别**。
+- `candidates/v5_416_proven_path/` 是当前推荐候选：它还匹配靶子模型的 416 输入和 512×288 摄像头通道，避免 1024 模型的异常输出链路。
 
 ## 本次发布
 
