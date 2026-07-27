@@ -83,6 +83,10 @@ def compile_model(args: argparse.Namespace) -> dict:
             ptq.calibrate_method = "NoClip"
             ptq.quant_type = "uint8"
             ptq.w_quant_type = "uint8"
+            # Match the proven target_best.kmodel pipeline. Per-channel weight
+            # ranges preserve small-object detector heads far better than one
+            # shared range for all channels.
+            ptq.export_weight_range_by_channel = True
             ptq.set_tensor_data(samples)
             compiler.use_ptq(ptq)
         compiler.compile()
