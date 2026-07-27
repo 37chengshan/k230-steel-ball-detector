@@ -4,7 +4,7 @@
 
 面向 **标准庐山派 K230 + CanMV v1.6** 的钢珠检测训练与部署工程。模型会识别画面中的每颗钢珠；K230 端脚本绘制检测框，并经 UART2 输出钢珠中心坐标。
 
-> 当前发布的是训练完成的 YOLO11n 权重和可复现脚本。KModel 的量化与 K230 实机长时间验收仍在进行，因此本仓库不会把未经实机验证的旧 KModel 冒充可用成品。
+> 本仓库已提供按 K230 / nncase 2.11 量化的 uint8 KModel。它通过了文件完整性与转换记录检查；**尚未完成你的实际板卡长时间验证**，请按下方验收清单先跑一次。
 
 ## 本次发布
 
@@ -12,6 +12,7 @@
 | --- | --- |
 | `models/yolo11n.pt` | Ultralytics YOLO11n 原始预训练权重 |
 | `models/steel_ball_reference_yolo11n_1024_best.pt` | 1024×1024 钢珠检测训练最佳权重 |
+| `models/steel_ball_reference_yolo11n_1024_uint8.kmodel` | K230 / nncase 2.11 uint8 量化模型（40 张校准图） |
 | `canmv/steel_ball_yolo11_uart.py` | CanMV K230 运行、框选、平滑追踪与 UART 上报脚本 |
 | `training/scripts/` | 数据清单构建、训练、ONNX 导出、训练看板脚本 |
 | `training/data/k230_hard_examples/` | K230 实拍的孔板、暗场两个空标签负样本 |
@@ -100,7 +101,7 @@ BALL,N=3;120,88;251,104;382,301\r\n
 - 孔板、暗场负样本：应输出 `balls=0`。
 - 正样本：应打印 `stage=KPU_OUTPUT_READY`，并显示稳定检测框。
 - 长时间运行：观察 FPS、内存与 UART 是否持续稳定。
-- 本项目尚未完成上述 K230 实机验收；完成后会补充已验证的 `.kmodel` 与结果。
+- 本项目尚未完成上述 K230 实机验收；欢迎反馈板卡型号、CanMV 固件版本、首条日志与实际效果。
 
 ## 许可与致谢
 
