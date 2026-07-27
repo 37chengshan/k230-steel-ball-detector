@@ -29,7 +29,7 @@ import sys
 import ulab.numpy as np
 
 
-SCRIPT_VERSION = "STEEL-BALL-YOLO11-416-W16-PTQ-V6"
+SCRIPT_VERSION = "STEEL-BALL-YOLO11-416-W16-V6.1-NO-GHOST"
 KMODEL_PATH = "/sdcard/models/steel_ball_reference_yolo11n_416_target_pipeline_calib103_w16.kmodel"
 LABELS = ["steel_ball"]
 MODEL_INPUT_SIZE = [416, 416]
@@ -37,14 +37,14 @@ AI_CAPTURE_SIZE = [512, 288]
 DISPLAY_MODE = "virt"       # "virt" for CanMV IDE, change to "lcd" for ST7701.
 DISPLAY_SIZE = [800, 480]
 CONFIDENCE_THRESHOLD = 0.20
-NMS_THRESHOLD = 0.70
-MAX_BOXES = 200
+NMS_THRESHOLD = 0.45
+MAX_BOXES = 80
 
 # A target has to appear in two nearby frames before it is published. A
-# confirmed target may coast briefly through a one-frame model miss, which
-# prevents the displayed box and UART coordinates from flickering.
+# A moving camera makes old coordinates invalid immediately. Do not coast old
+# boxes: otherwise every pan leaves six frames of stale boxes on the display.
 CONFIRM_HITS = 2
-COAST_MAX = 6
+COAST_MAX = 0
 MATCH_DISTANCE = 36
 EMA_ALPHA = 0.50
 
@@ -177,7 +177,7 @@ def send_centres(uart, detections):
     uart.write("BALL,N=%d;%s\r\n" % (len(points), ";".join(points)))
 
 
-def draw_detections(pipeline, detections, display_size):
+def draw_detections(pipeline, detections, display_size, raw_count):
     osd = pipeline.osd_img
     osd.clear()
     scale_x = display_size[0] / AI_CAPTURE_SIZE[0]
@@ -193,7 +193,7 @@ def draw_detections(pipeline, detections, display_size):
             "%d %d%%" % (index, int(score * 100)), color=(0, 255, 0),
         )
     osd.draw_string_advanced(
-        4, 4, 20, "balls=%d" % len(detections), color=(255, 255, 0),
+        4, 4, 20, "balls=%d raw=%d" % (len(detections), raw_count), color=(255, 255, 0),
     )
 
 
@@ -290,7 +290,11 @@ def main(frame_limit=None):
             if frame_id == 0:
                 print("stage=KPU_OUTPUT_READY raw=%d stable=%d" % (len(detections), len(stable_detections)))
                 print_first_kpu_tensor(detector)
-            draw_detections(pipeline, stable_detections, display_size)
+            if frame_id % 30 == 0:
+                print("stage=FRAME_COUNTS frame=%d raw=%d stable=%d" % (
+                    frame_id, len(detections), len(stable_detections),
+                ))
+            draw_detections(pipeline, stable_detections, display_size, len(detections))
             pipeline.show_image()
             if frame_id % UART_SEND_EVERY_N_FRAMES == 0:
                 send_centres(uart, stable_detections)
