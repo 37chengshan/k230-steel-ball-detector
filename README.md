@@ -4,7 +4,13 @@
 
 面向 **标准庐山派 K230 + CanMV v1.6** 的钢珠检测训练与部署工程。模型会识别画面中的每颗钢珠；K230 端脚本绘制检测框，并经 UART2 输出钢珠中心坐标。
 
-> 本仓库已提供按 K230 / nncase 2.11 量化的 uint8 KModel。它通过了文件完整性与转换记录检查；**尚未完成你的实际板卡长时间验证**，请按下方验收清单先跑一次。
+> 本仓库已提供 K230 / nncase 2.11 的量化候选模型。它们通过了文件完整性与转换记录检查；**尚未完成实际板卡长时间验证**，请按下方验收清单先跑一次。
+
+## 上板状态：请使用 v2 候选版
+
+- `models/steel_ball_reference_yolo11n_1024_uint8.kmodel`（v1）在 CanMV 上出现了满屏假框，**不要用于验证**。
+- `candidates/v2_raw_graph_f32/` 是修复版：把 `/255` 归一化固定在模型图内，避开 v1 的输入数值异常。
+- v2 已通过主机对照：无钢珠截图为 0 个候选；仍需 K230 实机确认。请把完整日志和空场景截图反馈回来。
 
 ## 本次发布
 
@@ -12,7 +18,8 @@
 | --- | --- |
 | `models/yolo11n.pt` | Ultralytics YOLO11n 原始预训练权重 |
 | `models/steel_ball_reference_yolo11n_1024_best.pt` | 1024×1024 钢珠检测训练最佳权重 |
-| `models/steel_ball_reference_yolo11n_1024_uint8.kmodel` | K230 / nncase 2.11 uint8 量化模型（40 张校准图） |
+| `models/steel_ball_reference_yolo11n_1024_uint8.kmodel` | v1 KModel，保留仅用于问题复现，**不要部署** |
+| `candidates/v2_raw_graph_f32/` | 修复输入归一化后的 K230 候选模型、脚本和量化记录 |
 | `canmv/steel_ball_yolo11_uart.py` | CanMV K230 运行、框选、平滑追踪与 UART 上报脚本 |
 | `training/scripts/` | 数据清单构建、训练、ONNX 导出、训练看板脚本 |
 | `training/data/k230_hard_examples/` | K230 实拍的孔板、暗场两个空标签负样本 |
@@ -62,25 +69,25 @@ python training/scripts/training_dashboard.py
 ```powershell
 python training/scripts/export_k230_onnx.py `
   --weights models/steel_ball_reference_yolo11n_1024_best.pt `
-  --output models/steel_ball_reference_yolo11n_1024_legacy.onnx `
-  --imgsz 1024
+  --output models/steel_ball_reference_yolo11n_1024_raw_uint8.onnx `
+  --imgsz 1024 --raw-uint8-input
 ```
 
-再用与你的 K230 CanMV 固件兼容的 nncase 2.11 工具链完成 uint8 PTQ，得到：
+再用与你的 K230 CanMV 固件兼容的 nncase 2.11 工具链完成 PTQ。当前 v2 把 `/255` 归一化写入 ONNX 图，得到：
 
 ```text
-steel_ball_reference_yolo11n_1024_uint8.kmodel
+steel_ball_reference_yolo11n_1024_raw_graph_f32.kmodel
 ```
 
-量化样本应来自上面下载的 `reference/maixcam2-steel-ball-v5/data/synth_field/images`。量化成功后，把 KModel 放到：
+量化样本应来自上面下载的 `reference/maixcam2-steel-ball-v5/data/synth_field/images`。量化成功后，把 v2 KModel 放到：
 
 ```text
-/sdcard/models/steel_ball_reference_yolo11n_1024_uint8.kmodel
+/sdcard/models/steel_ball_reference_yolo11n_1024_raw_graph_f32.kmodel
 ```
 
 ## K230 部署与 UART
 
-把 `canmv/steel_ball_yolo11_uart.py` 放到 TF 卡。脚本默认使用 CanMV IDE 虚拟显示，摄像头 AI 画面为 1024×1024。
+把 `candidates/v2_raw_graph_f32/steel_ball_yolo11_uart_v2.py` 放到 TF 卡。脚本默认使用 CanMV IDE 虚拟显示，摄像头 AI 画面为 1024×1024。
 
 | 信号 | 标准庐山派 K230 | 说明 |
 | --- | --- | --- |

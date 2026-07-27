@@ -29,11 +29,17 @@ def shape(value_info):
 class DetectionOutput(torch.nn.Module):
     """Export only YOLO's decoded detection tensor, not its training feature maps."""
 
-    def __init__(self, model):
+    def __init__(self, model, normalise_raw_uint8=False):
         super().__init__()
         self.model = model
+        self.normalise_raw_uint8 = normalise_raw_uint8
 
     def forward(self, image):
+        # CanMV's YOLO wrapper supplies raw RGBP uint8 pixels.  Keeping this
+        # divide inside the graph avoids relying on nncase's optional external
+        # preprocessor, which produced raw 0..255 input on the board.
+        if self.normalise_raw_uint8:
+            image = image / 255.0
         result = self.model(image)
         if isinstance(result, (tuple, list)):
             return result[0]
@@ -45,12 +51,16 @@ def main() -> None:
     parser.add_argument("--weights", type=Path, default=DEFAULT_WEIGHTS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--imgsz", type=int, default=1024)
+    parser.add_argument(
+        "--raw-uint8-input", action="store_true",
+        help="embed /255 normalisation so the exported model accepts raw camera pixels",
+    )
     args = parser.parse_args()
     if not args.weights.is_file():
         raise SystemExit("weights missing: %s" % args.weights)
 
     wrapper = YOLO(str(args.weights))
-    model = DetectionOutput(wrapper.model.fuse().eval().cpu())
+    model = DetectionOutput(wrapper.model.fuse().eval().cpu(), args.raw_uint8_input)
     sample = torch.zeros((1, 3, args.imgsz, args.imgsz), dtype=torch.float32)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
@@ -76,6 +86,7 @@ def main() -> None:
         "weights": str(args.weights.resolve()),
         "onnx": str(args.output.resolve()),
         "input_size": [args.imgsz, args.imgsz],
+        "raw_uint8_input": args.raw_uint8_input,
         "opsets": opsets,
         "inputs": [{"name": item.name, "shape": shape(item)} for item in graph.graph.input],
         "outputs": [{"name": item.name, "shape": shape(item)} for item in graph.graph.output],
