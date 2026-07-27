@@ -1,7 +1,3 @@
+.superpowers/
 __pycache__/
 *.py[cod]
-.venv/
-training/runs/
-models/*.onnx
-models/*.kmodel
-*.log
