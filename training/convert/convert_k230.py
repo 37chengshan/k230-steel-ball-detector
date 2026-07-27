@@ -48,6 +48,14 @@ def simplify_onnx(model_path: Path, output_path: Path, input_shape: list[int]) -
 def compile_model(args: argparse.Namespace) -> dict:
     import nncase
 
+    if args.no_external_preprocess:
+        raise ValueError(
+            "nncase 2.11 applies input_type and input_shape only when preprocess=True. "
+            "CanMV YOLO11 supplies uint8 frames, so --no-external-preprocess emits an "
+            "incompatible float-input KModel. Keep external preprocessing enabled; for an "
+            "ONNX graph that already divides by 255, pass --input-std 1 instead."
+        )
+
     width = ((args.input_width + 31) // 32) * 32
     height = ((args.input_height + 31) // 32) * 32
     input_shape = [1, 3, height, width]
@@ -57,7 +65,7 @@ def compile_model(args: argparse.Namespace) -> dict:
 
         options = nncase.CompileOptions()
         options.target = args.target
-        options.preprocess = not args.no_external_preprocess
+        options.preprocess = True
         options.swapRB = False
         options.input_shape = input_shape
         options.input_type = "uint8"
@@ -69,8 +77,7 @@ def compile_model(args: argparse.Namespace) -> dict:
         compiler = nncase.Compiler(options)
         compiler.import_onnx(simplified_path.read_bytes(), nncase.ImportOptions())
         if args.ptq_option != "none":
-            sample_dtype = np.float32 if args.no_external_preprocess else np.uint8
-            samples = generate_calibration_data(args.dataset, input_shape, args.samples, sample_dtype)
+            samples = generate_calibration_data(args.dataset, input_shape, args.samples, np.uint8)
             ptq = nncase.PTQTensorOptions()
             ptq.samples_count = len(samples)
             ptq.calibrate_method = "NoClip"
@@ -107,7 +114,7 @@ def main() -> None:
     parser.add_argument("--samples", type=int, default=50)
     parser.add_argument(
         "--no-external-preprocess", action="store_true",
-        help="keep raw uint8 input; use when the ONNX graph contains its own /255 normalisation",
+        help="unsupported with nncase 2.11; retained only to fail clearly instead of emitting an invalid KModel",
     )
     parser.add_argument(
         "--input-std", type=float, default=255.0,

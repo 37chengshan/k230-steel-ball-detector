@@ -26,6 +26,7 @@ from machine import FPIOA, UART
 import gc
 import os
 import sys
+import ulab.numpy as np
 
 
 SCRIPT_VERSION = "STEEL-BALL-YOLO11-REFERENCE-V2-RAW-GRAPH"
@@ -204,6 +205,31 @@ def print_exception(exc):
         pass
 
 
+def print_first_kpu_tensor(detector):
+    """Print the raw KPU score tensor before CanMV decodes it."""
+    if not detector.results:
+        print("stage=KPU_TENSOR_MISSING")
+        return
+    tensor = detector.results[0]
+    print("stage=KPU_TENSOR shape=%s dtype=%s" % (
+        getattr(tensor, "shape", None), getattr(tensor, "dtype", None),
+    ))
+    try:
+        shape = tensor.shape
+        if len(shape) == 3 and shape[1] == 5:
+            scores = tensor[0][4]
+            print("stage=KPU_SCORE layout=BCN max=%.6f above_020=%d" % (
+                float(np.max(scores)), int(np.sum(scores > CONFIDENCE_THRESHOLD)),
+            ))
+        elif len(shape) == 3 and shape[2] == 5:
+            scores = tensor[0][:, 4]
+            print("stage=KPU_SCORE layout=BNC max=%.6f above_020=%d" % (
+                float(np.max(scores)), int(np.sum(scores > CONFIDENCE_THRESHOLD)),
+            ))
+    except Exception as exc:
+        print("stage=KPU_TENSOR_DIAGNOSTIC_ERROR", exc)
+
+
 def main(frame_limit=None):
     """Run until stopped. ``frame_limit`` is for an on-board smoke test."""
     pipeline = None
@@ -263,6 +289,7 @@ def main(frame_limit=None):
             stable_detections = tracks_to_detections(tracker.update(detections))
             if frame_id == 0:
                 print("stage=KPU_OUTPUT_READY raw=%d stable=%d" % (len(detections), len(stable_detections)))
+                print_first_kpu_tensor(detector)
             draw_detections(pipeline, stable_detections, display_size)
             pipeline.show_image()
             if frame_id % UART_SEND_EVERY_N_FRAMES == 0:
