@@ -1,7 +1,7 @@
 """K230 CanMV v1.6 steel-ball detector for the YOLO26 epoch-19 KModel.
 
 TF-card layout:
-  /sdcard/models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel
+  /sdcard/models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel
   /sdcard/steel_ball_yolo26_uart_epoch19.py
 
 The model has an end-to-end output shaped [1, 300, 6]. Each row is
@@ -20,13 +20,13 @@ import nncase_runtime as nn
 import ulab.numpy as np
 
 
-SCRIPT_VERSION = "STEEL-BALL-YOLO26-EPOCH19-1024-V2"
-KMODEL_PATH = "/sdcard/models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel"
-MODEL_INPUT_SIZE = [1024, 1024]
-AI_CAPTURE_SIZE = [1024, 576]
+SCRIPT_VERSION = "STEEL-BALL-YOLO26-EPOCH19-416-U8W16-V3"
+KMODEL_PATH = "/sdcard/models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel"
+MODEL_INPUT_SIZE = [416, 416]
+AI_CAPTURE_SIZE = [512, 288]
 DISPLAY_MODE = "virt"
 DISPLAY_SIZE = [800, 480]
-CONFIDENCE_THRESHOLD = 0.25
+CONFIDENCE_THRESHOLD = 0.20
 MAX_BOXES = 100
 ENABLE_TRACKING = False
 
@@ -292,7 +292,11 @@ def main(frame_limit=None):
             frame = pipeline.get_frame()
             if frame is None:
                 raise RuntimeError("camera returned no frame")
+            if frame_id == 0:
+                print("stage=KPU_RUN_BEGIN")
             raw = detector.run(model_input(frame))
+            if frame_id == 0:
+                print("stage=KPU_RUN_END")
             stable = tracker.update(raw) if ENABLE_TRACKING else raw
             if frame_id == 0:
                 print("stage=FIRST_FRAME_READY raw=%d stable=%d" % (len(raw), len(stable)))

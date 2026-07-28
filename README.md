@@ -4,17 +4,18 @@
 
 面向 **标准庐山派 K230 + CanMV v1.6** 的钢珠检测训练与部署工程。模型会识别画面中的每颗钢珠；K230 端脚本绘制检测框，并经 UART2 输出钢珠中心坐标。
 
-> 当前推荐版本是 **YOLO26n 第 19 轮、1024×1024 FP32 KModel**。416 版本能抑制误报，但会漏掉拍摄距离较远的小钢珠；1024 版本恢复与训练一致的输入尺寸，并已通过真实图片的 ONNX/nncase Simulator 一致性验证。
+> 当前推荐版本是 **YOLO26n 第 19 轮、416×416 U8W16 量化 KModel**。实机日志证明 FP32 KModel 会停在第一次 KPU 推理，摄像头仍显示但模型从未返回；量化版用于恢复真正的 KPU 执行路径。
 
 ## 当前推荐版本
 
-- KModel：`models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel`
+- KModel：`models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel`
 - CanMV 脚本：`canmv/steel_ball_yolo26_uart_epoch19.py`
-- 输入：`uint8 NCHW [1,3,1024,1024]`，编译器内执行 `/255`
+- 输入：`uint8 NCHW [1,3,416,416]`，编译器内执行 `/255`
 - 输出：`[1,300,6]`，每行为 `[x1,y1,x2,y2,confidence,class_id]`
-- 板端阈值：`0.25`；脚本直接显示原始检测，不再用两帧追踪隐藏弱检测
-- 三张真实图片验证全部通过，ONNX/KModel 检测数量完全一致，匹配框 IoU 均高于 `0.996`
+- 量化：103 张正负样本校准，`uint8` 激活、`int16` 权重，文件约 5.5 MB
+- 板端阈值：`0.20`；脚本直接显示原始检测，不再用两帧追踪隐藏弱检测
 - 终端每 30 帧打印最高分数及 `0.05/0.10/0.20/0.30` 四档候选数，便于区分模型无输出和阈值过滤
+- 首帧额外打印 `KPU_RUN_BEGIN/KPU_RUN_END`；如果没有 `KPU_RUN_END`，说明仍是运行时兼容问题而不是识别率问题
 
 训练在第 20 轮开始后手动暂停，当前交付权重来自最后完成验证的第 19 轮：
 
@@ -36,10 +37,12 @@
 | 文件 | 说明 |
 | --- | --- |
 | `models/steel_ball_yolo26n_epoch19_best.pt` | 当前 YOLO26n 第 19 轮 PyTorch 最佳权重 |
-| `models/steel_ball_yolo26n_epoch19_1024.onnx` | 当前推荐的 1024×1024、opset 13 端到端 ONNX |
-| `models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel` | 当前推荐的 K230 / nncase 2.11 FP32 KModel |
+| `models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel` | 当前推荐的 K230 U8W16 量化 KModel |
+| `models/steel_ball_yolo26n_epoch19_416_u8w16.conversion.json` | 103 张校准样本和转换哈希记录 |
+| `models/steel_ball_yolo26n_epoch19_1024.onnx` | 1024×1024、opset 13 端到端 ONNX |
+| `models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel` | 实机首次 KPU 推理不返回，**不要部署** |
 | `models/steel_ball_yolo26n_epoch19_416.onnx` | 416×416、opset 13、端到端输出 ONNX |
-| `models/steel_ball_yolo26n_epoch19_416_fp32.kmodel` | 低算力/低误报备用 KModel，小目标召回较低 |
+| `models/steel_ball_yolo26n_epoch19_416_fp32.kmodel` | FP32 诊断文件，实机可能停在首次推理，**不要部署** |
 | `canmv/steel_ball_yolo26_uart_epoch19.py` | 当前推荐的 CanMV v1.6 检测、诊断与 UART 脚本 |
 | `docs/yolo26_epoch19_1024_validation.json` | 1024 版本三张真实图的一致性验证报告 |
 | `models/yolo11n.pt` | Ultralytics YOLO11n 原始预训练权重 |
@@ -116,8 +119,8 @@ steel_ball_reference_yolo11n_1024_raw_graph_f32.kmodel
 将以下两个文件复制到 TF 卡：
 
 ```text
-仓库 models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel
-  -> /sdcard/models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel
+仓库 models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel
+  -> /sdcard/models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel
 
 仓库 canmv/steel_ball_yolo26_uart_epoch19.py
   -> /sdcard/steel_ball_yolo26_uart_epoch19.py
@@ -126,9 +129,11 @@ steel_ball_reference_yolo11n_1024_raw_graph_f32.kmodel
 在 CanMV IDE 中运行 `/sdcard/steel_ball_yolo26_uart_epoch19.py`。首次正常启动应依次看到：
 
 ```text
-STEEL-BALL-YOLO26-EPOCH19-1024-V2
+STEEL-BALL-YOLO26-EPOCH19-416-U8W16-V3
 stage=PIPELINE_READY
 stage=MODEL_READY contract=[1,300,6]
+stage=KPU_RUN_BEGIN
+stage=KPU_RUN_END
 stage=KPU_OUTPUT shape=(1, 300, 6)
 stage=FIRST_FRAME_READY
 stage=DETECTION_DIAGNOSTIC max=... raw=... n005=... n010=... n020=... n030=...
