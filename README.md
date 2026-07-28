@@ -4,16 +4,17 @@
 
 面向 **标准庐山派 K230 + CanMV v1.6** 的钢珠检测训练与部署工程。模型会识别画面中的每颗钢珠；K230 端脚本绘制检测框，并经 UART2 输出钢珠中心坐标。
 
-> 当前推荐版本是 **YOLO26n 第 19 轮、416×416 U8W16 量化 KModel**。实机日志证明 FP32 KModel 会停在第一次 KPU 推理，摄像头仍显示但模型从未返回；量化版用于恢复真正的 KPU 执行路径。
+> 当前推荐版本是 **YOLO26n 第 19 轮、416×416 I16W8 量化 KModel**。原始无叠框画面的 7 颗钢珠在 416 ONNX 下能正确输出 7 个检测；U8 激活量化会明显抬高背景分数，因此改用 int16 激活保留中间特征精度。
 
 ## 当前推荐版本
 
-- KModel：`models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel`
+- KModel：`models/steel_ball_yolo26n_epoch19_416_i16w8.kmodel`
 - CanMV 脚本：`canmv/steel_ball_yolo26_uart_epoch19.py`
 - 输入：`uint8 NCHW [1,3,416,416]`，编译器内执行 `/255`
 - 输出：`[1,300,6]`，每行为 `[x1,y1,x2,y2,confidence,class_id]`
-- 量化：103 张正负样本校准，`uint8` 激活、`int16` 权重，文件约 5.5 MB
-- 板端阈值：`0.20`；脚本直接显示原始检测，不再用两帧追踪隐藏弱检测
+- 量化：103 张正负样本校准，`int16` 激活、`uint8` 权重，文件约 3.3 MB
+- 原始候选阈值 `0.15`，显示阈值 `0.30`；中等分数需连续 3 帧，高分目标需连续 2 帧
+- 显示框使用坐标和置信度 EMA 平滑，并拒绝宽扁、超大和面积异常的候选框
 - 终端每 30 帧打印最高分数及 `0.05/0.10/0.20/0.30` 四档候选数，便于区分模型无输出和阈值过滤
 - 首帧额外打印 `KPU_RUN_BEGIN/KPU_RUN_END`；如果没有 `KPU_RUN_END`，说明仍是运行时兼容问题而不是识别率问题
 
@@ -37,8 +38,9 @@
 | 文件 | 说明 |
 | --- | --- |
 | `models/steel_ball_yolo26n_epoch19_best.pt` | 当前 YOLO26n 第 19 轮 PyTorch 最佳权重 |
-| `models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel` | 当前推荐的 K230 U8W16 量化 KModel |
-| `models/steel_ball_yolo26n_epoch19_416_u8w16.conversion.json` | 103 张校准样本和转换哈希记录 |
+| `models/steel_ball_yolo26n_epoch19_416_i16w8.kmodel` | 当前推荐的 K230 I16W8 量化 KModel |
+| `models/steel_ball_yolo26n_epoch19_416_i16w8.conversion.json` | 103 张校准样本和转换哈希记录 |
+| `models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel` | 可运行但背景分数明显升高，保留作问题复现 |
 | `models/steel_ball_yolo26n_epoch19_1024.onnx` | 1024×1024、opset 13 端到端 ONNX |
 | `models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel` | 实机首次 KPU 推理不返回，**不要部署** |
 | `models/steel_ball_yolo26n_epoch19_416.onnx` | 416×416、opset 13、端到端输出 ONNX |
@@ -119,8 +121,8 @@ steel_ball_reference_yolo11n_1024_raw_graph_f32.kmodel
 将以下两个文件复制到 TF 卡：
 
 ```text
-仓库 models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel
-  -> /sdcard/models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel
+仓库 models/steel_ball_yolo26n_epoch19_416_i16w8.kmodel
+  -> /sdcard/models/steel_ball_yolo26n_epoch19_416_i16w8.kmodel
 
 仓库 canmv/steel_ball_yolo26_uart_epoch19.py
   -> /sdcard/steel_ball_yolo26_uart_epoch19.py
@@ -129,7 +131,7 @@ steel_ball_reference_yolo11n_1024_raw_graph_f32.kmodel
 在 CanMV IDE 中运行 `/sdcard/steel_ball_yolo26_uart_epoch19.py`。首次正常启动应依次看到：
 
 ```text
-STEEL-BALL-YOLO26-EPOCH19-416-U8W16-V3
+STEEL-BALL-YOLO26-EPOCH19-416-I16W8-V4
 stage=PIPELINE_READY
 stage=MODEL_READY contract=[1,300,6]
 stage=KPU_RUN_BEGIN

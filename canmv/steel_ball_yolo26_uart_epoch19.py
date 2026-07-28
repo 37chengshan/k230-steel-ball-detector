@@ -1,7 +1,7 @@
 """K230 CanMV v1.6 steel-ball detector for the YOLO26 epoch-19 KModel.
 
 TF-card layout:
-  /sdcard/models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel
+  /sdcard/models/steel_ball_yolo26n_epoch19_416_i16w8.kmodel
   /sdcard/steel_ball_yolo26_uart_epoch19.py
 
 The model has an end-to-end output shaped [1, 300, 6]. Each row is
@@ -20,20 +20,30 @@ import nncase_runtime as nn
 import ulab.numpy as np
 
 
-SCRIPT_VERSION = "STEEL-BALL-YOLO26-EPOCH19-416-U8W16-V3"
-KMODEL_PATH = "/sdcard/models/steel_ball_yolo26n_epoch19_416_u8w16.kmodel"
+SCRIPT_VERSION = "STEEL-BALL-YOLO26-EPOCH19-416-I16W8-V4"
+KMODEL_PATH = "/sdcard/models/steel_ball_yolo26n_epoch19_416_i16w8.kmodel"
 MODEL_INPUT_SIZE = [416, 416]
 AI_CAPTURE_SIZE = [512, 288]
 DISPLAY_MODE = "virt"
 DISPLAY_SIZE = [800, 480]
-CONFIDENCE_THRESHOLD = 0.20
+CONFIDENCE_THRESHOLD = 0.15
+DISPLAY_CONFIDENCE_THRESHOLD = 0.30
+FAST_CONFIRM_THRESHOLD = 0.70
 MAX_BOXES = 100
-ENABLE_TRACKING = False
+ENABLE_TRACKING = True
 
-CONFIRM_HITS = 2
-COAST_MAX = 4
+CONFIRM_HITS = 3
+COAST_MAX = 2
 MATCH_DISTANCE = 36
 EMA_ALPHA = 0.50
+SCORE_EMA_ALPHA = 0.35
+
+MIN_BOX_SIDE = 5
+MIN_ASPECT_RATIO = 0.60
+MAX_ASPECT_RATIO = 1.65
+MAX_BOX_WIDTH_RATIO = 0.22
+MAX_BOX_HEIGHT_RATIO = 0.35
+MAX_BOX_AREA_RATIO = 0.08
 
 ENABLE_UART = True
 UART_ID = UART.UART2
@@ -169,6 +179,24 @@ class Track:
         return self.x + self.width // 2, self.y + self.height // 2
 
 
+def detection_passes_geometry(detection):
+    """Reject large or elongated regions that cannot be a competition ball."""
+    _, _, width, height, _ = detection
+    if width < MIN_BOX_SIDE or height < MIN_BOX_SIDE:
+        return False
+    aspect_ratio = width / height
+    if aspect_ratio < MIN_ASPECT_RATIO or aspect_ratio > MAX_ASPECT_RATIO:
+        return False
+    frame_width, frame_height = AI_CAPTURE_SIZE
+    if width > frame_width * MAX_BOX_WIDTH_RATIO:
+        return False
+    if height > frame_height * MAX_BOX_HEIGHT_RATIO:
+        return False
+    if width * height > frame_width * frame_height * MAX_BOX_AREA_RATIO:
+        return False
+    return True
+
+
 class Tracker:
     def __init__(self):
         self.tracks = []
@@ -191,6 +219,8 @@ class Tracker:
                     best_index = index
             if best_index < 0:
                 track.misses += 1
+                if not track.confirmed:
+                    track.hits = 0
                 continue
             x, y, width, height, confidence = detections[best_index]
             used[best_index] = True
@@ -199,10 +229,17 @@ class Tracker:
             track.y = int(round(alpha * y + (1 - alpha) * track.y))
             track.width = max(1, int(round(alpha * width + (1 - alpha) * track.width)))
             track.height = max(1, int(round(alpha * height + (1 - alpha) * track.height)))
-            track.confidence = confidence
+            score_alpha = SCORE_EMA_ALPHA
+            track.confidence = score_alpha * confidence + (1 - score_alpha) * track.confidence
             track.hits += 1
             track.misses = 0
-            if track.hits >= CONFIRM_HITS:
+            if (
+                track.hits >= CONFIRM_HITS
+                and track.confidence >= DISPLAY_CONFIDENCE_THRESHOLD
+            ) or (
+                track.hits >= 2
+                and track.confidence >= FAST_CONFIRM_THRESHOLD
+            ):
                 track.confirmed = True
         for index, detection in enumerate(detections):
             if not used[index]:
@@ -297,19 +334,23 @@ def main(frame_limit=None):
             raw = detector.run(model_input(frame))
             if frame_id == 0:
                 print("stage=KPU_RUN_END")
-            stable = tracker.update(raw) if ENABLE_TRACKING else raw
+            shaped = [detection for detection in raw if detection_passes_geometry(detection)]
+            stable = tracker.update(shaped) if ENABLE_TRACKING else shaped
             if frame_id == 0:
                 print("stage=FIRST_FRAME_READY raw=%d stable=%d" % (len(raw), len(stable)))
             if frame_id % 30 == 0:
-                print("stage=DETECTION_DIAGNOSTIC max=%.4f raw=%d n005=%d n010=%d n020=%d n030=%d" % (
+                print("stage=DETECTION_DIAGNOSTIC max=%.4f raw=%d shaped=%d stable=%d n005=%d n010=%d n020=%d n030=%d" % (
                     detector.last_max_score,
                     len(raw),
+                    len(shaped),
+                    len(stable),
                     detector.last_count_005,
                     detector.last_count_010,
                     detector.last_count_020,
                     detector.last_count_030,
                 ))
-            draw_detections(pipeline, stable, display_size, detector.last_max_score)
+            stable_max = max([detection[4] for detection in stable]) if stable else 0.0
+            draw_detections(pipeline, stable, display_size, stable_max)
             pipeline.show_image()
             if frame_id % UART_SEND_EVERY_N_FRAMES == 0:
                 send_centres(uart, stable)
