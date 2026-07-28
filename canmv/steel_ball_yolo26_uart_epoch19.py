@@ -1,7 +1,7 @@
 """K230 CanMV v1.6 steel-ball detector for the YOLO26 epoch-19 KModel.
 
 TF-card layout:
-  /sdcard/models/steel_ball_yolo26n_epoch19_416_fp32.kmodel
+  /sdcard/models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel
   /sdcard/steel_ball_yolo26_uart_epoch19.py
 
 The model has an end-to-end output shaped [1, 300, 6]. Each row is
@@ -20,14 +20,15 @@ import nncase_runtime as nn
 import ulab.numpy as np
 
 
-SCRIPT_VERSION = "STEEL-BALL-YOLO26-EPOCH19-416-V1"
-KMODEL_PATH = "/sdcard/models/steel_ball_yolo26n_epoch19_416_fp32.kmodel"
-MODEL_INPUT_SIZE = [416, 416]
-AI_CAPTURE_SIZE = [512, 288]
+SCRIPT_VERSION = "STEEL-BALL-YOLO26-EPOCH19-1024-V2"
+KMODEL_PATH = "/sdcard/models/steel_ball_yolo26n_epoch19_1024_fp32.kmodel"
+MODEL_INPUT_SIZE = [1024, 1024]
+AI_CAPTURE_SIZE = [1024, 576]
 DISPLAY_MODE = "virt"
 DISPLAY_SIZE = [800, 480]
-CONFIDENCE_THRESHOLD = 0.30
+CONFIDENCE_THRESHOLD = 0.25
 MAX_BOXES = 100
+ENABLE_TRACKING = False
 
 CONFIRM_HITS = 2
 COAST_MAX = 4
@@ -77,6 +78,11 @@ class Yolo26Detector(AIBase):
         self.model_input_size = model_input_size
         self.rgb888p_size = rgb888p_size
         self.output_logged = False
+        self.last_max_score = 0.0
+        self.last_count_005 = 0
+        self.last_count_010 = 0
+        self.last_count_020 = 0
+        self.last_count_030 = 0
         self.ai2d = Ai2d(debug_mode)
         self.ai2d.set_ai2d_dtype(
             nn.ai2d_format.NCHW_FMT,
@@ -115,10 +121,25 @@ class Yolo26Detector(AIBase):
         scale_x = source_w / model_w
         scale_y = source_h / model_h
         detections = []
+        max_score = 0.0
+        count_005 = 0
+        count_010 = 0
+        count_020 = 0
+        count_030 = 0
         for index in range(shape[1]):
             row = rows[index]
             score = float(row[4])
             class_id = int(round(float(row[5])))
+            if class_id == 0:
+                max_score = max(max_score, score)
+                if score >= 0.05:
+                    count_005 += 1
+                if score >= 0.10:
+                    count_010 += 1
+                if score >= 0.20:
+                    count_020 += 1
+                if score >= 0.30:
+                    count_030 += 1
             if score < CONFIDENCE_THRESHOLD or class_id != 0:
                 continue
             x1 = clamp(int(round(float(row[0]) * scale_x)), 0, source_w - 1)
@@ -128,6 +149,11 @@ class Yolo26Detector(AIBase):
             if x2 <= x1 or y2 <= y1:
                 continue
             detections.append((x1, y1, x2 - x1, y2 - y1, score))
+        self.last_max_score = max_score
+        self.last_count_005 = count_005
+        self.last_count_010 = count_010
+        self.last_count_020 = count_020
+        self.last_count_030 = count_030
         detections.sort(key=lambda item: item[4], reverse=True)
         return detections[:MAX_BOXES]
 
@@ -188,7 +214,7 @@ class Tracker:
         ]
 
 
-def draw_detections(pipeline, detections, display_size):
+def draw_detections(pipeline, detections, display_size, max_score):
     osd = pipeline.osd_img
     osd.clear()
     scale_x = display_size[0] / AI_CAPTURE_SIZE[0]
@@ -203,7 +229,11 @@ def draw_detections(pipeline, detections, display_size):
             dx, max(0, dy - 18), 18,
             "%d %d%%" % (index, int(score * 100)), color=(0, 255, 0),
         )
-    osd.draw_string_advanced(4, 4, 20, "balls=%d" % len(detections), color=(255, 255, 0))
+    osd.draw_string_advanced(
+        4, 4, 20,
+        "balls=%d max=%d%%" % (len(detections), int(max_score * 100)),
+        color=(255, 255, 0),
+    )
 
 
 def send_centres(uart, detections):
@@ -263,10 +293,19 @@ def main(frame_limit=None):
             if frame is None:
                 raise RuntimeError("camera returned no frame")
             raw = detector.run(model_input(frame))
-            stable = tracker.update(raw)
+            stable = tracker.update(raw) if ENABLE_TRACKING else raw
             if frame_id == 0:
                 print("stage=FIRST_FRAME_READY raw=%d stable=%d" % (len(raw), len(stable)))
-            draw_detections(pipeline, stable, display_size)
+            if frame_id % 30 == 0:
+                print("stage=DETECTION_DIAGNOSTIC max=%.4f raw=%d n005=%d n010=%d n020=%d n030=%d" % (
+                    detector.last_max_score,
+                    len(raw),
+                    detector.last_count_005,
+                    detector.last_count_010,
+                    detector.last_count_020,
+                    detector.last_count_030,
+                ))
+            draw_detections(pipeline, stable, display_size, detector.last_max_score)
             pipeline.show_image()
             if frame_id % UART_SEND_EVERY_N_FRAMES == 0:
                 send_centres(uart, stable)

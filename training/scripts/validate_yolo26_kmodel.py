@@ -91,6 +91,8 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=3)
     parser.add_argument("--confidence", type=float, default=0.30)
     parser.add_argument("--minimum-iou", type=float, default=0.98)
+    parser.add_argument("--input-width", type=int, default=416)
+    parser.add_argument("--input-height", type=int, default=416)
     args = parser.parse_args()
 
     import nncase
@@ -107,14 +109,15 @@ def main() -> None:
     input_name = session.get_inputs()[0].name
     simulator = nncase.Simulator()
     simulator.load_model(args.kmodel.read_bytes())
-    if list(simulator.get_input_shape(0)) != [1, 3, 416, 416]:
+    expected_input_shape = [1, 3, args.input_height, args.input_width]
+    if list(simulator.get_input_shape(0)) != expected_input_shape:
         raise RuntimeError(f"unexpected input shape: {simulator.get_input_shape(0)}")
     if list(simulator.get_output_shape(0)) != [1, 300, 6]:
         raise RuntimeError(f"unexpected output shape: {simulator.get_output_shape(0)}")
 
     results = []
     for path in image_paths:
-        uint8_input = prepare_image(path, 416, 416)
+        uint8_input = prepare_image(path, args.input_width, args.input_height)
         onnx_output = session.run(None, {input_name: uint8_input.astype(np.float32) / 255.0})[0]
         simulator.set_input_tensor(0, nncase.RuntimeTensor.from_numpy(uint8_input))
         simulator.run()
@@ -136,7 +139,7 @@ def main() -> None:
     report = {
         "onnx": args.onnx.as_posix(),
         "kmodel": args.kmodel.as_posix(),
-        "input_shape": [1, 3, 416, 416],
+        "input_shape": expected_input_shape,
         "output_shape": [1, 300, 6],
         "confidence": args.confidence,
         "minimum_iou": args.minimum_iou,
